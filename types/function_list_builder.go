@@ -24,7 +24,7 @@ type FunctionLookupBuilder struct {
 	TopicDelimiter string
 }
 
-//getNamespaces get openfaas namespaces
+// getNamespaces gets OpenFaaS namespaces
 func (s *FunctionLookupBuilder) getNamespaces() ([]string, error) {
 	var (
 		err        error
@@ -45,7 +45,9 @@ func (s *FunctionLookupBuilder) getNamespaces() ([]string, error) {
 	}
 
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 	}
 
 	if res.StatusCode != http.StatusNotFound {
@@ -91,12 +93,14 @@ func (s *FunctionLookupBuilder) getFunctions(namespace string) ([]types.Function
 	}
 
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 	}
 
 	bytesOut, _ := ioutil.ReadAll(res.Body)
 
-	functions := []types.FunctionStatus{}
+	var functions []types.FunctionStatus
 	marshalErr := json.Unmarshal(bytesOut, &functions)
 
 	if marshalErr != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/openfaas/faas-provider/auth"
 )
 
+// GetCredentials retrieves basic auth credentials
 func GetCredentials() *auth.BasicAuthCredentials {
 	var credentials *auth.BasicAuthCredentials
 
