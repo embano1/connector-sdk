@@ -7,12 +7,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 
 	"github.com/pkg/errors"
+)
+
+var (
+	ErrEmptyMessage = fmt.Errorf("empty message supplied")
 )
 
 type Invoker struct {
@@ -24,8 +26,8 @@ type Invoker struct {
 
 type InvokerResponse struct {
 	Context  context.Context
-	Body     *[]byte
-	Header   *http.Header
+	Body     []byte
+	Header   http.Header
 	Status   int
 	Error    error
 	Topic    string
@@ -42,74 +44,89 @@ func NewInvoker(gatewayURL string, client *http.Client, printResponse bool) *Inv
 }
 
 // Invoke triggers a function by accessing the API Gateway
-func (i *Invoker) Invoke(topicMap *TopicMap, topic string, message *[]byte) {
-	i.InvokeWithContext(context.Background(), topicMap, topic, message)
+func (i *Invoker) Invoke(topicMap *TopicMap, topic string, message []byte) (int, error) {
+	return i.InvokeWithContext(context.Background(), topicMap, topic, message)
 }
 
-//InvokeWithContext triggers a function by accessing the API Gateway while propagating context
-func (i *Invoker) InvokeWithContext(ctx context.Context, topicMap *TopicMap, topic string, message *[]byte) {
-	if len(*message) == 0 {
-		i.Responses <- InvokerResponse{
-			Context: ctx,
-			Error:   fmt.Errorf("no message to send"),
-		}
+// InvokeWithContext triggers a function by accessing the API Gateway while propagating context
+func (i *Invoker) InvokeWithContext(ctx context.Context, topicMap *TopicMap, topic string, message []byte) (int, error) {
+	if len(message) == 0 {
+		return 0, ErrEmptyMessage
 	}
 
 	matchedFunctions := topicMap.Match(topic)
-	for _, matchedFunction := range matchedFunctions {
-		log.Printf("Invoke function: %s", matchedFunction)
-
-		gwURL := fmt.Sprintf("%s/%s", i.GatewayURL, matchedFunction)
-		reader := bytes.NewReader(*message)
-
-		body, statusCode, header, doErr := invokefunction(ctx, i.Client, gwURL, reader)
-
-		if doErr != nil {
-			i.Responses <- InvokerResponse{
-				Context: ctx,
-				Error:   errors.Wrap(doErr, fmt.Sprintf("unable to invoke %s", matchedFunction)),
-			}
-			continue
-		}
-
-		i.Responses <- InvokerResponse{
-			Context:  ctx,
-			Body:     body,
-			Status:   statusCode,
-			Header:   header,
-			Function: matchedFunction,
-			Topic:    topic,
-		}
+	matched := len(matchedFunctions)
+	if matched == 0 {
+		return 0, nil
 	}
+
+	// parallelize invoking functions
+	for _, matchedFunction := range matchedFunctions {
+		go func(function string) {
+			body, statusCode, header, doErr := i.InvokeFunction(ctx, function, message)
+
+			if doErr != nil {
+				i.Responses <- InvokerResponse{
+					Context:  ctx,
+					Status:   statusCode,
+					Header:   header,
+					Function: function,
+					Topic:    topic,
+					Error:    errors.Wrap(doErr, fmt.Sprintf("unable to invoke %s", function)),
+				}
+				return
+			}
+
+			i.Responses <- InvokerResponse{
+				Context:  ctx,
+				Body:     body,
+				Status:   statusCode,
+				Header:   header,
+				Function: function,
+				Topic:    topic,
+			}
+		}(matchedFunction)
+	}
+
+	return matched, nil
 }
 
-func invokefunction(ctx context.Context, c *http.Client, gwURL string, reader io.Reader) (*[]byte, int, *http.Header, error) {
+// InvokeFunction invokes the specified function with the given message body. It
+// returns the function response (if any), the http status code, headers and
+// error.
+func (i *Invoker) InvokeFunction(ctx context.Context, function string, message []byte) ([]byte, int, http.Header, error) {
+	fnURL := fmt.Sprintf("%s/%s", i.GatewayURL, function)
 
-	httpReq, _ := http.NewRequest(http.MethodPost, gwURL, reader)
-	httpReq.WithContext(ctx)
+	buf := bytes.NewBuffer(message)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fnURL, buf)
+	if err != nil {
+		return nil, http.StatusInternalServerError, nil, err
+	}
 
 	if httpReq.Body != nil {
-		defer httpReq.Body.Close()
+		defer func() {
+			_ = httpReq.Body.Close()
+		}()
 	}
 
-	var body *[]byte
-
-	res, doErr := c.Do(httpReq)
-	if doErr != nil {
-		return nil, http.StatusServiceUnavailable, nil, doErr
+	res, err := i.Client.Do(httpReq)
+	if err != nil {
+		return nil, http.StatusInternalServerError, nil, err
 	}
 
+	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 
-		bytesOut, readErr := ioutil.ReadAll(res.Body)
-		if readErr != nil {
-			log.Printf("Error reading body")
-			return nil, http.StatusServiceUnavailable, nil, doErr
+		body, err = ioutil.ReadAll(res.Body)
+		if err != nil {
+			// log.Printf("Error reading body")
+			return nil, http.StatusInternalServerError, nil, err
 
 		}
-		body = &bytesOut
 	}
 
-	return body, res.StatusCode, &res.Header, doErr
+	return body, res.StatusCode, res.Header, err
 }
