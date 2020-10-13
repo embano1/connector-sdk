@@ -6,12 +6,18 @@ package types
 import (
 	"context"
 	"fmt"
-	"log"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/openfaas/faas-provider/auth"
 )
+
+// Logger defines the logging interface for passing a custom logger
+type Logger interface {
+	Println(v ...interface{})
+	Fatal(v ...interface{})
+}
 
 // ControllerConfig configures a connector SDK controller
 type ControllerConfig struct {
@@ -42,9 +48,10 @@ type ControllerConfig struct {
 
 // Controller is used to invoke functions on a per-topic basis and to subscribe to responses returned by said functions.
 type Controller interface {
-	Subscribe(subscriber ResponseSubscriber)
-	Invoke(topic string, message *[]byte)
-	InvokeWithContext(ctx context.Context, topic string, message *[]byte)
+	Subscribe(ResponseSubscriber)
+	Invoke(string, []byte) (int, error)
+	InvokeWithContext(context.Context, string, []byte) (int, error)
+	InvokeFunction(context.Context, string, []byte) ([]byte, int, http.Header, error)
 	BeginMapBuilder()
 	Topics() []string
 }
@@ -63,6 +70,9 @@ type controller struct {
 	// Credentials to access gateway
 	Credentials *auth.BasicAuthCredentials
 
+	// custom Logger
+	log Logger
+
 	// Subscribers which can receive messages from invocations.
 	// See note on ResponseSubscriber interface about blocking/long-running
 	// operations
@@ -72,16 +82,16 @@ type controller struct {
 	Lock *sync.RWMutex
 }
 
-// NewController create a new connector SDK controller
-func NewController(credentials *auth.BasicAuthCredentials, config *ControllerConfig) Controller {
-
+// NewController create a new connector SDK controller. Passing nil values will
+// cause a panic.
+func NewController(credentials *auth.BasicAuthCredentials, config *ControllerConfig, log Logger) Controller {
 	gatewayFunctionPath := gatewayRoute(config)
 
 	invoker := NewInvoker(gatewayFunctionPath,
 		MakeClient(config.UpstreamTimeout),
 		config.PrintResponse)
 
-	subs := []ResponseSubscriber{}
+	var subs []ResponseSubscriber
 
 	topicMap := NewTopicMap()
 
@@ -90,6 +100,7 @@ func NewController(credentials *auth.BasicAuthCredentials, config *ControllerCon
 		Invoker:     invoker,
 		TopicMap:    &topicMap,
 		Credentials: credentials,
+		log:         log,
 		Subscribers: subs,
 		Lock:        &sync.RWMutex{},
 	}
@@ -126,20 +137,26 @@ func (c *controller) Subscribe(subscriber ResponseSubscriber) {
 
 // Invoke attempts to invoke any functions which match the
 // topic the incoming message was published on.
-func (c *controller) Invoke(topic string, message *[]byte) {
-	c.InvokeWithContext(context.Background(), topic, message)
+func (c *controller) Invoke(topic string, message []byte) (int, error) {
+	return c.InvokeWithContext(context.Background(), topic, message)
 }
 
 // InvokeWithContext attempts to invoke any functions which match the topic
 // the incoming message was published on while propagating context.
-func (c *controller) InvokeWithContext(ctx context.Context, topic string, message *[]byte) {
-	c.Invoker.InvokeWithContext(ctx, c.TopicMap, topic, message)
+func (c *controller) InvokeWithContext(ctx context.Context, topic string, message []byte) (int, error) {
+	return c.Invoker.InvokeWithContext(ctx, c.TopicMap, topic, message)
+}
+
+// InvokeFunction invokes the specified function with the given message body. It
+// returns the function response (if any), the http status code, headers and
+// error.
+func (c *controller) InvokeFunction(ctx context.Context, function string, message []byte) ([]byte, int, http.Header, error) {
+	return c.Invoker.InvokeFunction(ctx, function, message)
 }
 
 // BeginMapBuilder begins to build a map of function->topic by
 // querying the API gateway.
 func (c *controller) BeginMapBuilder() {
-
 	lookupBuilder := FunctionLookupBuilder{
 		GatewayURL:     c.Config.GatewayURL,
 		Client:         MakeClient(c.Config.UpstreamTimeout),
@@ -158,11 +175,11 @@ func (c *controller) synchronizeLookups(ticker *time.Ticker,
 	fn := func() {
 		lookups, err := lookupBuilder.Build()
 		if err != nil {
-			log.Fatalln(err)
+			c.log.Fatal(err)
 		}
 
 		if c.Config.PrintSync {
-			log.Println("Syncing topic map")
+			c.log.Println("Syncing topic map")
 		}
 
 		topicMap.Sync(&lookups)

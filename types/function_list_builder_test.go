@@ -18,9 +18,9 @@ func TestBuildSingleMatchingFunction(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			annotationMap := make(map[string]string)
 			annotationMap["topic"] = "topic1"
 
@@ -30,7 +30,7 @@ func TestBuildSingleMatchingFunction(t *testing.T) {
 				Namespace:   "openfaas-fn",
 			})
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -56,9 +56,9 @@ func Test_Build_SingleFunctionNoDelimiter(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			annotationMap := make(map[string]string)
 			annotationMap["topic"] = "topic1"
 
@@ -67,7 +67,7 @@ func Test_Build_SingleFunctionNoDelimiter(t *testing.T) {
 				Annotations: &annotationMap,
 			})
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -92,9 +92,9 @@ func TestBuildMultiMatchingFunction(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			annotationMap := make(map[string]string)
 			annotationMap["topic"] = "topic1,topic2,topic3"
 
@@ -103,7 +103,7 @@ func TestBuildMultiMatchingFunction(t *testing.T) {
 				Annotations: &annotationMap,
 			})
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -126,9 +126,9 @@ func TestBuildMultiMatchingFunction(t *testing.T) {
 func TestBuildNoFunctions(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		functions := []types.FunctionStatus{}
+		var functions []types.FunctionStatus
 		bytesOut, _ := json.Marshal(functions)
-		w.Write(bytesOut)
+		_, _ = w.Write(bytesOut)
 	}))
 
 	client := srv.Client()
@@ -153,10 +153,10 @@ func Test_Build_JustDelim(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
 
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			annotationMap := make(map[string]string)
 			annotationMap["topic"] = ","
 
@@ -165,7 +165,7 @@ func Test_Build_JustDelim(t *testing.T) {
 				Annotations: &annotationMap,
 			})
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -191,9 +191,9 @@ func Test_Build_MultiMatchingFunctionBespokeDelim(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			annotationMap := make(map[string]string)
 			annotationMap["topic"] = "topic1|topic2|topic3,withcomma"
 
@@ -202,7 +202,7 @@ func Test_Build_MultiMatchingFunctionBespokeDelim(t *testing.T) {
 				Annotations: &annotationMap,
 			})
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -331,9 +331,9 @@ func Test_BuildMultipleNamespaceFunction(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn", "fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			annotationMap := make(map[string]string)
 			annotationMap["topic"] = "topic1"
 
@@ -343,7 +343,7 @@ func Test_BuildMultipleNamespaceFunction(t *testing.T) {
 				Namespace:   "openfaas-fn",
 			})
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -374,7 +374,7 @@ func Test_GetNamespaces(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		namespaces := []string{"openfaas-fn", "fn"}
 		bytesOut, _ := json.Marshal(namespaces)
-		w.Write(bytesOut)
+		_, _ = w.Write(bytesOut)
 	}))
 
 	client := srv.Client()
@@ -395,7 +395,7 @@ func Test_GetNamespaces(t *testing.T) {
 func Test_GetNamespaces_ProviderGives404(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Not available"))
+		_, _ = w.Write([]byte("Not available"))
 	}))
 
 	client := srv.Client()
@@ -421,9 +421,9 @@ func Test_GetFunctions(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			if r.URL.Query().Get("namespace") == "openfaas-fn" {
 				annotationMap := make(map[string]string)
 				annotationMap["topic"] = "topic1"
@@ -435,7 +435,7 @@ func Test_GetFunctions(t *testing.T) {
 				})
 			}
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
@@ -461,9 +461,9 @@ func Test_GetEmptyFunctions(t *testing.T) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn"}
 			bytesOut, _ := json.Marshal(namespaces)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		} else {
-			functions := []types.FunctionStatus{}
+			var functions []types.FunctionStatus
 			if r.URL.Query().Get("namespace") == "openfaas-fn" {
 				annotationMap := make(map[string]string)
 				annotationMap["topic"] = "topic1"
@@ -476,7 +476,7 @@ func Test_GetEmptyFunctions(t *testing.T) {
 
 			}
 			bytesOut, _ := json.Marshal(functions)
-			w.Write(bytesOut)
+			_, _ = w.Write(bytesOut)
 		}
 	}))
 
