@@ -15,8 +15,9 @@ import (
 
 // Logger defines the logging interface for passing a custom logger
 type Logger interface {
-	Println(v ...interface{})
+	Info(v ...interface{})
 	Fatal(v ...interface{})
+	Debug(v ...interface{})
 }
 
 // ControllerConfig configures a connector SDK controller
@@ -179,7 +180,7 @@ func (c *controller) synchronizeLookups(ticker *time.Ticker,
 		}
 
 		if c.Config.PrintSync {
-			c.log.Println("Syncing topic map")
+			c.log.Debug("Syncing topic map")
 		}
 
 		topicMap.Sync(&lookups)
