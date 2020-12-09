@@ -26,13 +26,9 @@ type FunctionLookupBuilder struct {
 
 // getNamespaces gets OpenFaaS namespaces
 func (s *FunctionLookupBuilder) getNamespaces() ([]string, error) {
-	var (
-		err        error
-		namespaces []string
-	)
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/system/namespaces", s.GatewayURL), nil)
 	if err != nil {
-		return namespaces, err
+		return nil, errors.Wrap(err, "create request")
 	}
 
 	if s.Credentials != nil {
@@ -41,29 +37,35 @@ func (s *FunctionLookupBuilder) getNamespaces() ([]string, error) {
 
 	res, err := s.Client.Do(req)
 	if err != nil {
-		return namespaces, err
+		return nil, errors.Wrap(err, "send request")
 	}
 
-	if res.Body != nil {
-		defer func() {
-			_ = res.Body.Close()
-		}()
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	code := res.StatusCode
+	if code == http.StatusUnauthorized {
+		return nil, fmt.Errorf("authentication failure against gateway: %s", http.StatusText(code))
 	}
 
-	if res.StatusCode != http.StatusNotFound {
-		bytesOut, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			return namespaces, err
-		}
+	if !(code >= http.StatusOK && code <= 299) {
+		return nil, fmt.Errorf("get namespaces unexpected HTTP response: %s", http.StatusText(code))
+	}
 
-		if len(bytesOut) == 0 {
-			return namespaces, nil
-		}
+	bytesOut, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "read response body")
+	}
 
-		err = json.Unmarshal(bytesOut, &namespaces)
-		if err != nil {
-			return namespaces, err
-		}
+	if len(bytesOut) == 0 {
+		return nil, errors.New("empty response body")
+	}
+
+	var namespaces []string
+	err = json.Unmarshal(bytesOut, &namespaces)
+	if err != nil {
+		return nil, errors.Wrap(err, "unmarshal JSON")
 	}
 
 	return namespaces, err
@@ -73,7 +75,7 @@ func (s *FunctionLookupBuilder) getFunctions(namespace string) ([]types.Function
 	gateway := fmt.Sprintf("%s/system/functions", s.GatewayURL)
 	gatewayURL, err := url.Parse(gateway)
 	if err != nil {
-		return []types.FunctionStatus{}, fmt.Errorf("invalid gateway URL: %s", err.Error())
+		return nil, fmt.Errorf("invalid gateway URL: %s", err.Error())
 	}
 	if len(namespace) > 0 {
 		query := gatewayURL.Query()
@@ -81,30 +83,42 @@ func (s *FunctionLookupBuilder) getFunctions(namespace string) ([]types.Function
 		gatewayURL.RawQuery = query.Encode()
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, gatewayURL.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, gatewayURL.String(), nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "create request")
+	}
+
 	if s.Credentials != nil {
 		req.SetBasicAuth(s.Credentials.User, s.Credentials.Password)
 	}
 
-	res, reqErr := s.Client.Do(req)
-
-	if reqErr != nil {
-		return []types.FunctionStatus{}, reqErr
+	res, err := s.Client.Do(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "send request")
 	}
 
-	if res.Body != nil {
-		defer func() {
-			_ = res.Body.Close()
-		}()
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	code := res.StatusCode
+	if code == http.StatusUnauthorized {
+		return nil, fmt.Errorf("authentication failure against gateway: %s", http.StatusText(code))
 	}
 
-	bytesOut, _ := ioutil.ReadAll(res.Body)
+	if !(code >= http.StatusOK && code <= 299) {
+		return nil, fmt.Errorf("get functions unexpected HTTP response: %s", http.StatusText(code))
+	}
+
+	bytesOut, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "read response body")
+	}
 
 	var functions []types.FunctionStatus
-	marshalErr := json.Unmarshal(bytesOut, &functions)
-
-	if marshalErr != nil {
-		return []types.FunctionStatus{}, errors.Wrap(marshalErr, fmt.Sprintf("unable to unmarshal value: %q", string(bytesOut)))
+	err = json.Unmarshal(bytesOut, &functions)
+	if err != nil {
+		return nil, errors.Wrap(err, "unmarshal JSON")
 	}
 
 	return functions, nil
