@@ -5,10 +5,13 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
+	"github.com/openfaas/faas-provider/auth"
 	"github.com/openfaas/faas-provider/types"
 )
 
@@ -326,7 +329,6 @@ func Test_appendServiceMap(t *testing.T) {
 }
 
 func Test_BuildMultipleNamespaceFunction(t *testing.T) {
-
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/system/namespaces" {
 			namespaces := []string{"openfaas-fn", "fn"}
@@ -367,51 +369,6 @@ func Test_BuildMultipleNamespaceFunction(t *testing.T) {
 	}
 	if len(functions) != 2 {
 		t.Errorf("Topic %s - want: %d functions, got: %d", "topic1", 2, len(functions))
-	}
-}
-
-func Test_GetNamespaces(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		namespaces := []string{"openfaas-fn", "fn"}
-		bytesOut, _ := json.Marshal(namespaces)
-		_, _ = w.Write(bytesOut)
-	}))
-
-	client := srv.Client()
-	builder := FunctionLookupBuilder{
-		Client:     client,
-		GatewayURL: srv.URL,
-	}
-
-	namespaces, err := builder.getNamespaces()
-	if err != nil {
-		t.Errorf("%s", err.Error())
-	}
-	if len(namespaces) != 2 {
-		t.Errorf("Namespaces - want: %d, got: %d", 2, len(namespaces))
-	}
-}
-
-func Test_GetNamespaces_ProviderGives404(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte("Not available"))
-	}))
-
-	client := srv.Client()
-	builder := FunctionLookupBuilder{
-		Client:     client,
-		GatewayURL: srv.URL,
-	}
-
-	namespaces, err := builder.getNamespaces()
-	if err != nil {
-		t.Errorf("%s", err.Error())
-	}
-	want := 0
-	got := len(namespaces)
-	if len(namespaces) != 0 {
-		t.Errorf("Namespaces when 404, want %d, but got: %d", want, got)
 	}
 }
 
@@ -494,4 +451,140 @@ func Test_GetEmptyFunctions(t *testing.T) {
 	if len(functions) != 0 {
 		t.Errorf("Functions - want: %d items, got: %d", 0, len(functions))
 	}
+}
+
+func TestFunctionLookupBuilder_getNamespaces(t *testing.T) {
+	var srv *httptest.Server
+	defer func() {
+		if srv != nil {
+			srv.Close()
+		}
+	}()
+
+	type fields struct {
+		handler     http.Handler
+		credentials *auth.BasicAuthCredentials
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		want    []string
+		wantErr error
+	}{
+		{
+			name: "401 invalid credentials (empty user and password)",
+			fields: fields{
+				handler:     authHandler(t),
+				credentials: &auth.BasicAuthCredentials{},
+			},
+			want:    nil,
+			wantErr: fmt.Errorf("authentication failure against gateway: %s", http.StatusText(401)),
+		},
+		{
+			name: "401 no credentials with gateway enforcing basic auth",
+			fields: fields{
+				handler:     authHandler(t),
+				credentials: nil,
+			},
+			want:    nil,
+			wantErr: fmt.Errorf("authentication failure against gateway: %s", http.StatusText(401)),
+		},
+		{
+			name: "500 internal server error",
+			fields: fields{
+				handler:     internalSrvErrHandler(t),
+				credentials: nil,
+			},
+			want:    nil,
+			wantErr: fmt.Errorf("get namespaces unexpected HTTP response: %s", http.StatusText(500)),
+		},
+		{
+			name: "no namespaces returned (empty body)",
+			fields: fields{
+				handler:     emptyBodyHandler(t),
+				credentials: nil,
+			},
+			want:    nil,
+			wantErr: fmt.Errorf("empty response body"),
+		},
+		{
+			name: "namespaces returned",
+			fields: fields{
+				handler:     namespaceHandler(t),
+				credentials: nil,
+			},
+			want:    []string{"openfaas-fn"},
+			wantErr: nil,
+		},
+	}
+	for _, tt := range tests {
+		srv = httptest.NewServer(tt.fields.handler)
+
+		t.Run(tt.name, func(t *testing.T) {
+			s := &FunctionLookupBuilder{
+				GatewayURL:  srv.URL,
+				Client:      srv.Client(),
+				Credentials: tt.fields.credentials,
+			}
+			got, err := s.getNamespaces()
+			if err != nil && err.Error() != tt.wantErr.Error() {
+				t.Errorf("getNamespaces() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("getNamespaces() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func authHandler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if u, p, ok := r.BasicAuth(); ok {
+			if u != "" && p != "" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+	})
+}
+
+func internalSrvErrHandler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	})
+}
+
+func emptyBodyHandler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func namespaceHandler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ns []string
+		if r.URL.Path != "/system/namespaces" {
+			http.NotFoundHandler()
+		}
+
+		ns = []string{"openfaas-fn"}
+		b, err := json.Marshal(ns)
+		if err != nil {
+			t.Errorf("marshal JSON: %v", err)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(b)
+		if err != nil {
+			t.Errorf("write response: %v", err)
+			return
+		}
+	})
 }
